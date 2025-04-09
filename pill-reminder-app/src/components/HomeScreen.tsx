@@ -1,50 +1,75 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import type { StackNavigationProp } from '@react-navigation/stack';
-import { getNextMedicationWindow } from '../utils/MedicationSchedule';
+import { getCurrentWindow, checkPillTaken, savePillTaken, getNextDoseTime } from '../utils/pillTracker';
 import { retroStyles } from '../styles/RetroStyles';
 
-type RootStackParamList = {
-  Home: undefined;
-  Notifications: { time: string; onConfirm: () => void };
-};
-
-type HomeScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Home'>;
-
 export default function HomeScreen() {
-  const navigation = useNavigation<HomeScreenNavigationProp>();
-  const [nextMedication, setNextMedication] = useState(getNextMedicationWindow());
+    const [morningTaken, setMorningTaken] = useState(false);
+    const [eveningTaken, setEveningTaken] = useState(false);
+    const [currentWindow, setCurrentWindow] = useState<'morning' | 'evening' | 'outside'>('outside');
+    const [nextDose, setNextDose] = useState('');
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setNextMedication(getNextMedicationWindow());
-    }, 60000);
-    return () => clearInterval(timer);
-  }, []);
+    useEffect(() => {
+        checkStatus();
+        const interval = setInterval(checkStatus, 60000); // Update every minute
+        return () => clearInterval(interval);
+    }, []);
 
-  return (
-    <View style={retroStyles.container}>
-      <Text style={retroStyles.pixelTitle}>PILL REMINDER</Text>
-      
-      <View style={retroStyles.nextDoseContainer}>
-        <Text style={retroStyles.nextDoseLabel}>NEXT DOSE:</Text>
-        <Text style={retroStyles.nextDoseTime}>
-          {nextMedication.window.toUpperCase()}
-          {'\n'}
-          {nextMedication.time}
-        </Text>
-      </View>
+    const checkStatus = async () => {
+        const window = getCurrentWindow();
+        setCurrentWindow(window);
+        setMorningTaken(await checkPillTaken('morning'));
+        setEveningTaken(await checkPillTaken('evening'));
+        setNextDose(getNextDoseTime());
+    };
 
-      <TouchableOpacity 
-        style={retroStyles.pixelButton}
-        onPress={() => navigation.navigate('Notifications', {
-          time: new Date().toLocaleTimeString(),
-          onConfirm: () => console.log('Pills taken')
-        })}
-      >
-        <Text style={retroStyles.pixelButtonText}>TAKE PILLS NOW</Text>
-      </TouchableOpacity>
-    </View>
-  );
+    const handlePillTaken = async () => {
+        if (currentWindow === 'outside') return;
+        await savePillTaken(currentWindow);
+        await checkStatus();
+    };
+
+    const getButtonText = () => {
+        if (currentWindow === 'outside') return 'Wait for next dose window';
+        if (currentWindow === 'morning' && morningTaken) return 'Morning Pills Taken!';
+        if (currentWindow === 'evening' && eveningTaken) return 'Evening Pills Taken!';
+        return 'I took them!';
+    };
+
+    const isButtonDisabled = () => {
+        if (currentWindow === 'outside') return true;
+        if (currentWindow === 'morning') return morningTaken;
+        return eveningTaken;
+    };
+
+    return (
+        <View style={retroStyles.container}>
+            <View style={retroStyles.nextDoseContainer}>
+                <Text style={retroStyles.nextDoseLabel}>Next Dose:</Text>
+                <Text style={retroStyles.nextDoseTime}>{nextDose}</Text>
+            </View>
+
+            <View style={retroStyles.statusContainer}>
+                <Text style={retroStyles.statusText}>
+                    Morning: {morningTaken ? '✓' : '⨯'}
+                </Text>
+                <Text style={retroStyles.statusText}>
+                    Evening: {eveningTaken ? '✓' : '⨯'}
+                </Text>
+            </View>
+
+            <TouchableOpacity 
+                style={[
+                    retroStyles.pixelButton,
+                    isButtonDisabled() && retroStyles.pixelButtonDisabled
+                ]}
+                onPress={handlePillTaken}
+                disabled={isButtonDisabled()}
+            >
+                <Text style={retroStyles.pixelButtonText}>
+                    {getButtonText()}
+                </Text>
+            </TouchableOpacity>
+        </View>
+    );
 }
